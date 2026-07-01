@@ -26,8 +26,8 @@ dependencies:
   excel: ^4.0.6
   csv: ^6.0.0
 
-  # Audio/Video conversion (mp3, mp4, wav, etc.) - maintained fork, original was discontinued
-  ffmpeg_kit_flutter_new: ^4.3.2
+  # Audio/Video conversion removed - ffmpeg packages were causing build failures.
+  # See STEPS.md for how to re-add this later if needed.
 
   # Word document (docx) reading/writing
   archive: ^3.6.1
