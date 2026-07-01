@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'package:pdf/pdf.dart';
+import 'dart:ui';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import 'package:path_provider/path_provider.dart';
 
 /// Handles all PDF-related conversions.
@@ -29,11 +29,11 @@ class PdfConverter {
   /// PDF -> plain text (extracts all readable text from the PDF)
   static Future<File> pdfToText(File pdfFile) async {
     final bytes = await pdfFile.readAsBytes();
-    final document = PdfDocument(inputBytes: bytes);
+    final document = sf.PdfDocument(inputBytes: bytes);
 
     final buffer = StringBuffer();
     for (int i = 0; i < document.pages.count; i++) {
-      final text = PdfTextExtractor(document).extractText(startPageIndex: i);
+      final text = sf.PdfTextExtractor(document).extractText(startPageIndex: i);
       buffer.writeln(text);
       buffer.writeln('--- Page ${i + 1} end ---');
     }
@@ -47,11 +47,11 @@ class PdfConverter {
 
   /// Merge multiple PDFs into one
   static Future<File> mergePdfs(List<File> pdfFiles) async {
-    final PdfDocument finalDoc = PdfDocument();
+    final sf.PdfDocument finalDoc = sf.PdfDocument();
 
     for (final file in pdfFiles) {
       final bytes = await file.readAsBytes();
-      final srcDoc = PdfDocument(inputBytes: bytes);
+      final srcDoc = sf.PdfDocument(inputBytes: bytes);
       for (int i = 0; i < srcDoc.pages.count; i++) {
         final template = srcDoc.pages[i].createTemplate();
         finalDoc.pages.add().graphics.drawPdfTemplate(template, const Offset(0, 0));
