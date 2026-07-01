@@ -5,7 +5,6 @@ import 'package:share_plus/share_plus.dart';
 
 import 'services/image_converter.dart';
 import 'services/document_converter.dart';
-import 'services/media_converter.dart';
 import 'services/pdf_converter.dart';
 import 'services/docx_converter.dart';
 
@@ -68,9 +67,6 @@ class _HomePageState extends State<HomePage> {
           break;
         case ConverterType.xlsxToCsv:
           output = await DocumentConverter.xlsxToCsv(_pickedFile!);
-          break;
-        case ConverterType.media:
-          output = await MediaConverter.convert(_pickedFile!, target);
           break;
         case ConverterType.imageToPdf:
           output = await PdfConverter.imagesToPdf([_pickedFile!]);
@@ -155,13 +151,6 @@ class _HomePageState extends State<HomePage> {
               _btn('Word → Text', () => _convertTo('', ConverterType.wordToText)),
               _btn('Text → Word', () => _convertTo('', ConverterType.textToWord)),
             ]),
-            const SizedBox(height: 16),
-            const Text('Audio / Video', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('MP3', () => _convertTo('mp3', ConverterType.media)),
-              _btn('MP4', () => _convertTo('mp4', ConverterType.media)),
-              _btn('WAV', () => _convertTo('wav', ConverterType.media)),
-            ]),
             const SizedBox(height: 24),
             if (_busy) const CircularProgressIndicator(),
             if (_status != null) Text(_status!),
@@ -185,7 +174,6 @@ enum ConverterType {
   jsonToCsv,
   csvToXlsx,
   xlsxToCsv,
-  media,
   imageToPdf,
   pdfToText,
   textToPdf,
