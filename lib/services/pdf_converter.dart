@@ -1,21 +1,96 @@
 import 'dart:io';
 import 'dart:ui';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import 'package:path_provider/path_provider.dart';
+import 'package:image/image.dart' as img;
+
+/// Page size presets, in points (1 cm = 28.3465 pt).
+enum PdfPageSize { a4, letter, a5, actualSizeFromDpi }
+
+/// How the image should be placed on the page.
+enum PdfFitMode { fitPage, actualSize }
 
 /// Handles all PDF-related conversions.
 class PdfConverter {
-  /// One or more images -> single PDF
-  static Future<File> imagesToPdf(List<File> imageFiles) async {
+  /// One or more images -> single PDF, with full control over layout.
+  ///
+  /// - [marginCm]: page margin on all sides, in centimeters.
+  /// - [quality]: JPEG re-encode quality 1-100 (lower = smaller file size).
+  /// - [pageSize]: A4 / Letter / A5, or actualSizeFromDpi to make the PDF
+  ///   page exactly match the image's physical print size at [dpi].
+  /// - [fitMode]: fitPage scales the image to fill the page (minus
+  ///   margins) preserving aspect ratio; actualSize places the image at
+  ///   its true physical size (pixels / dpi), useful for scans that need
+  ///   to print at exact scale.
+  /// - [dpi]: only used when pageSize is actualSizeFromDpi or fitMode is
+  ///   actualSize. Standard scan/print DPI is 300; screenshots are ~96.
+  static Future<File> imagesToPdf(
+    List<File> imageFiles, {
+    double marginCm = 1.0,
+    int quality = 90,
+    PdfPageSize pageSize = PdfPageSize.a4,
+    PdfFitMode fitMode = PdfFitMode.fitPage,
+    double dpi = 300,
+  }) async {
     final doc = pw.Document();
+    final marginPt = marginCm * PdfPageFormat.cm;
 
     for (final file in imageFiles) {
-      final bytes = await file.readAsBytes();
-      final image = pw.MemoryImage(bytes);
+      final rawBytes = await file.readAsBytes();
+      final decoded = img.decodeImage(rawBytes);
+      if (decoded == null) continue;
+
+      // Re-encode as JPEG at the chosen quality - this is what actually
+      // controls output file size, same as "quality" sliders in most
+      // official PDF/image converter apps.
+      final jpegBytes = img.encodeJpg(decoded, quality: quality.clamp(1, 100));
+      final pdfImage = pw.MemoryImage(jpegBytes);
+
+      // Physical size of the image at the given DPI, in points.
+      final imgWidthPt = (decoded.width / dpi) * PdfPageFormat.inch;
+      final imgHeightPt = (decoded.height / dpi) * PdfPageFormat.inch;
+
+      PdfPageFormat format;
+      if (pageSize == PdfPageSize.actualSizeFromDpi) {
+        format = PdfPageFormat(
+          imgWidthPt + marginPt * 2,
+          imgHeightPt + marginPt * 2,
+          marginAll: marginPt,
+        );
+      } else {
+        final base = switch (pageSize) {
+          PdfPageSize.letter => PdfPageFormat.letter,
+          PdfPageSize.a5 => PdfPageFormat.a5,
+          _ => PdfPageFormat.a4,
+        };
+        format = base.copyWith(
+          marginLeft: marginPt,
+          marginRight: marginPt,
+          marginTop: marginPt,
+          marginBottom: marginPt,
+        );
+      }
+
       doc.addPage(
         pw.Page(
-          build: (context) => pw.Center(child: pw.Image(image)),
+          pageFormat: format,
+          build: (context) {
+            if (fitMode == PdfFitMode.actualSize ||
+                pageSize == PdfPageSize.actualSizeFromDpi) {
+              return pw.Center(
+                child: pw.SizedBox(
+                  width: imgWidthPt,
+                  height: imgHeightPt,
+                  child: pw.Image(pdfImage, fit: pw.BoxFit.fill),
+                ),
+              );
+            }
+            return pw.Center(
+              child: pw.Image(pdfImage, fit: pw.BoxFit.contain),
+            );
+          },
         ),
       );
     }
