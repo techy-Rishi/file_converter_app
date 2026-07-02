@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'services/image_converter.dart';
@@ -10,27 +9,11 @@ import 'services/document_converter.dart';
 import 'services/pdf_converter.dart';
 import 'services/docx_converter.dart';
 
-// DEBUG SWITCH: set to false to completely disable ads (no init, no
-// banner load). Use this to test whether AdMob is causing a crash.
-const bool kAdsEnabled = false;
-
-// TODO: Replace with your own AdMob banner unit ID once you have an AdMob
-// account. This is Google's public TEST ad unit ID - it shows real ads
-// during development but earns no real money. See STEPS.md for setup.
-const String kBannerAdUnitId = 'ca-app-pub-3940256099942544/6300978111';
-
 // TODO: Replace with your real support email.
 const String kSupportEmail = 'support@example.com';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  if (kAdsEnabled) {
-    // Wrapped in try/catch: if AdMob isn't configured correctly (missing
-    // App ID in AndroidManifest, etc.), don't let it crash the whole app.
-    try {
-      MobileAds.instance.initialize();
-    } catch (_) {}
-  }
   runApp(const ConverterApp());
 }
 
@@ -56,42 +39,6 @@ class _HomePageState extends State<HomePage> {
   List<File> _pickedFiles = [];
   String? _status;
   bool _busy = false;
-  BannerAd? _bannerAd;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadBannerAd();
-  }
-
-  void _loadBannerAd() {
-    if (!kAdsEnabled) return;
-    try {
-      _bannerAd = BannerAd(
-        adUnitId: kBannerAdUnitId,
-        size: AdSize.banner,
-        request: const AdRequest(),
-        listener: BannerAdListener(
-          onAdLoaded: (_) {
-            if (mounted) setState(() {});
-          },
-          onAdFailedToLoad: (ad, error) {
-            ad.dispose();
-          },
-        ),
-      )..load();
-    } catch (_) {
-      // If AdMob isn't configured correctly, silently skip the ad
-      // instead of crashing the app.
-      _bannerAd = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    _bannerAd?.dispose();
-    super.dispose();
-  }
 
   Future<void> _pickFile() async {
     // allowMultiple lets you select several files at once for batch
@@ -262,13 +209,6 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      bottomNavigationBar: _bannerAd == null
-          ? null
-          : SizedBox(
-              height: _bannerAd!.size.height.toDouble(),
-              width: _bannerAd!.size.width.toDouble(),
-              child: AdWidget(ad: _bannerAd!),
-            ),
     );
   }
 
