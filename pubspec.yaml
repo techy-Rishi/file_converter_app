@@ -38,8 +38,10 @@ dependencies:
   share_plus: ^10.1.4
   permission_handler: ^12.0.2
 
-  # Ads (AdMob)
-  google_mobile_ads: ^7.0.0
+  # Ads (AdMob) - temporarily removed entirely (not just disabled in Dart)
+  # to test whether the native AdMob library itself is causing a startup
+  # crash via its own auto-initializing Android components.
+  # google_mobile_ads: ^7.0.0
 
   # Contact/feedback email link
   url_launcher: ^6.3.1
