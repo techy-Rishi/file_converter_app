@@ -93,9 +93,7 @@ class _HomePageState extends State<HomePage> {
 
       if (output != null) {
         setState(() => _status = 'Done: ${output!.path}');
-        await SharePlus.instance.share(
-          ShareParams(files: [XFile(output.path)]),
-        );
+        await Share.shareXFiles([XFile(output.path)]);
       } else {
         setState(() => _status = 'Conversion failed.');
       }
