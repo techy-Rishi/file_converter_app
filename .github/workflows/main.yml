@@ -64,3 +64,6 @@ jobs:
         with:
           name: app-release-aab
           path: build/app/outputs/bundle/release/app-release.aab
+
+      - name: Set app name and add AdMob App ID to AndroidManifest
+        run: python3 scripts/patch_manifest.py
