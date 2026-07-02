@@ -12,14 +12,14 @@ dependencies:
   cupertino_icons: ^1.0.6
 
   # File picking
-  file_picker: ^10.3.11
+  file_picker: ^10.3.10
   path_provider: ^2.1.5
 
   # Image conversion (jpg, png, webp, bmp, gif)
-  image: ^4.3.0
+  image: ^4.2.0
 
   # PDF creation / reading
-  pdf: ^3.11.1
+  pdf: ^3.10.8
   syncfusion_flutter_pdf: ^25.1.35
 
   # Spreadsheet (xlsx/csv)
