@@ -20,7 +20,11 @@ const String kSupportEmail = 'support@example.com';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MobileAds.instance.initialize();
+  // Wrapped in try/catch: if AdMob isn't configured correctly (missing
+  // App ID in AndroidManifest, etc.), don't let it crash the whole app.
+  try {
+    MobileAds.instance.initialize();
+  } catch (_) {}
   runApp(const ConverterApp());
 }
 
@@ -55,15 +59,25 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _loadBannerAd() {
-    _bannerAd = BannerAd(
-      adUnitId: kBannerAdUnitId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (_) => setState(() {}),
-        onAdFailedToLoad: (ad, error) => ad.dispose(),
-      ),
-    )..load();
+    try {
+      _bannerAd = BannerAd(
+        adUnitId: kBannerAdUnitId,
+        size: AdSize.banner,
+        request: const AdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (_) {
+            if (mounted) setState(() {});
+          },
+          onAdFailedToLoad: (ad, error) {
+            ad.dispose();
+          },
+        ),
+      )..load();
+    } catch (_) {
+      // If AdMob isn't configured correctly, silently skip the ad
+      // instead of crashing the app.
+      _bannerAd = null;
+    }
   }
 
   @override
