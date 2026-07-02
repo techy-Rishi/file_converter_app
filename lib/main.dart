@@ -10,6 +10,10 @@ import 'services/document_converter.dart';
 import 'services/pdf_converter.dart';
 import 'services/docx_converter.dart';
 
+// DEBUG SWITCH: set to false to completely disable ads (no init, no
+// banner load). Use this to test whether AdMob is causing a crash.
+const bool kAdsEnabled = false;
+
 // TODO: Replace with your own AdMob banner unit ID once you have an AdMob
 // account. This is Google's public TEST ad unit ID - it shows real ads
 // during development but earns no real money. See STEPS.md for setup.
@@ -20,11 +24,13 @@ const String kSupportEmail = 'support@example.com';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Wrapped in try/catch: if AdMob isn't configured correctly (missing
-  // App ID in AndroidManifest, etc.), don't let it crash the whole app.
-  try {
-    MobileAds.instance.initialize();
-  } catch (_) {}
+  if (kAdsEnabled) {
+    // Wrapped in try/catch: if AdMob isn't configured correctly (missing
+    // App ID in AndroidManifest, etc.), don't let it crash the whole app.
+    try {
+      MobileAds.instance.initialize();
+    } catch (_) {}
+  }
   runApp(const ConverterApp());
 }
 
@@ -59,6 +65,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _loadBannerAd() {
+    if (!kAdsEnabled) return;
     try {
       _bannerAd = BannerAd(
         adUnitId: kBannerAdUnitId,
