@@ -23,13 +23,14 @@ jobs:
           rm -rf android
           flutter create . --platforms=android
 
-      - name: Set app display name (ConvertKaro)
+      - name: Set app name and add AdMob App ID to AndroidManifest
         run: |
-          sed -i 's/android:label="file_converter_app"/android:label="ConvertKaro"/' android/app/src/main/AndroidManifest.xml
-
-      - name: Add AdMob App ID to AndroidManifest (required or the app crashes on launch)
-        run: |
-          sed -i 's#</application>#    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="file_converter_app"/android:label="ConvertKaro"/' "$MANIFEST"
+          sed -i $'s#</application>#    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/>\n    </application>#' "$MANIFEST"
+          grep -q 'APPLICATION_ID' "$MANIFEST" && echo "AdMob App ID inserted OK" || (echo "FAILED to insert AdMob App ID" && exit 1)
+          grep -q 'ConvertKaro' "$MANIFEST" && echo "App name set OK" || (echo "FAILED to set app name" && exit 1)
+          cat "$MANIFEST"
 
       - name: Get dependencies
         run: flutter pub get
