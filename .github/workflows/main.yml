@@ -23,8 +23,19 @@ jobs:
           rm -rf android
           flutter create . --platforms=android
 
+      - name: Set app display name (ConvertKaro)
+        run: |
+          sed -i 's/android:label="file_converter_app"/android:label="ConvertKaro"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Add AdMob App ID to AndroidManifest (required or the app crashes on launch)
+        run: |
+          sed -i 's#</application>#    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
+
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Generate app launcher icon
+        run: dart run flutter_launcher_icons
 
       - name: Build debug APK
         run: flutter build apk --debug
