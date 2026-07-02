@@ -24,13 +24,7 @@ jobs:
           flutter create . --platforms=android
 
       - name: Set app name and add AdMob App ID to AndroidManifest
-        run: |
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i 's/android:label="file_converter_app"/android:label="ConvertKaro"/' "$MANIFEST"
-          sed -i $'s#</application>#    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/>\n    </application>#' "$MANIFEST"
-          grep -q 'APPLICATION_ID' "$MANIFEST" && echo "AdMob App ID inserted OK" || (echo "FAILED to insert AdMob App ID" && exit 1)
-          grep -q 'ConvertKaro' "$MANIFEST" && echo "App name set OK" || (echo "FAILED to set app name" && exit 1)
-          cat "$MANIFEST"
+        run: python3 scripts/patch_manifest.py
 
       - name: Get dependencies
         run: flutter pub get
@@ -64,6 +58,3 @@ jobs:
         with:
           name: app-release-aab
           path: build/app/outputs/bundle/release/app-release.aab
-
-      - name: Set app name and add AdMob App ID to AndroidManifest
-        run: python3 scripts/patch_manifest.py
