@@ -45,6 +45,8 @@ class _HomePageState extends State<HomePage> {
   double _marginCm = 1.0;
   int _quality = 90;
   PdfPageSize _pageSize = PdfPageSize.a4;
+  double _customWidthCm = 21.0;
+  double _customHeightCm = 29.7;
   PdfFitMode _fitMode = PdfFitMode.fitPage;
   double _dpi = 300;
 
@@ -125,12 +127,62 @@ class _HomePageState extends State<HomePage> {
                           child: Text('A5'),
                         ),
                         DropdownMenuItem(
+                          value: PdfPageSize.custom,
+                          child: Text('Custom size (cm)'),
+                        ),
+                        DropdownMenuItem(
                           value: PdfPageSize.actualSizeFromDpi,
                           child: Text('Actual size (from DPI)'),
                         ),
                       ],
                       onChanged: (v) => setDialogState(() => _pageSize = v!),
                     ),
+                    if (_pageSize == PdfPageSize.custom) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Width (cm)',
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
+                              controller: TextEditingController(
+                                text: _customWidthCm.toString(),
+                              ),
+                              onChanged: (v) {
+                                final parsed = double.tryParse(v);
+                                if (parsed != null) {
+                                  setDialogState(() => _customWidthCm = parsed);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Height (cm)',
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
+                              controller: TextEditingController(
+                                text: _customHeightCm.toString(),
+                              ),
+                              onChanged: (v) {
+                                final parsed = double.tryParse(v);
+                                if (parsed != null) {
+                                  setDialogState(() => _customHeightCm = parsed);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     const Text('Fit mode'),
                     DropdownButton<PdfFitMode>(
@@ -202,6 +254,8 @@ class _HomePageState extends State<HomePage> {
             marginCm: _marginCm,
             quality: _quality,
             pageSize: _pageSize,
+            customWidthCm: _customWidthCm,
+            customHeightCm: _customHeightCm,
             fitMode: _fitMode,
             dpi: _dpi,
           ));
@@ -236,6 +290,8 @@ class _HomePageState extends State<HomePage> {
               marginCm: _marginCm,
               quality: _quality,
               pageSize: _pageSize,
+              customWidthCm: _customWidthCm,
+              customHeightCm: _customHeightCm,
               fitMode: _fitMode,
               dpi: _dpi,
             );
@@ -266,7 +322,10 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (outputs.isNotEmpty) {
-        setState(() => _status = 'Done: ${outputs.length} file(s)');
+        final sizes = await Future.wait(outputs.map((f) => f.length()));
+        final totalBytes = sizes.fold<int>(0, (sum, s) => sum + s);
+        setState(() => _status =
+            'Done: ${outputs.length} file(s), ${_formatBytes(totalBytes)}');
         await Share.shareXFiles(outputs.map((f) => XFile(f.path)).toList());
       } else {
         setState(() => _status = 'Conversion failed.');
@@ -276,6 +335,312 @@ class _HomePageState extends State<HomePage> {
     } finally {
       setState(() => _busy = false);
     }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+
+  /// Shared runner for the newer dialog-based tools below: handles the
+  /// busy/status state, computes total output size, and shares results.
+  Future<void> _runConversion(Future<List<File>> Function() task) async {
+    setState(() {
+      _busy = true;
+      _status = 'Converting...';
+    });
+    try {
+      final outputs = await task();
+      if (outputs.isNotEmpty) {
+        final sizes = await Future.wait(outputs.map((f) => f.length()));
+        final totalBytes = sizes.fold<int>(0, (sum, s) => sum + s);
+        setState(() => _status =
+            'Done: ${outputs.length} file(s), ${_formatBytes(totalBytes)}');
+        await Share.shareXFiles(outputs.map((f) => XFile(f.path)).toList());
+      } else {
+        setState(() => _status = 'Conversion failed.');
+      }
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _mergePdfsAction() async {
+    if (_pickedFiles.length < 2) {
+      setState(() => _status = 'Pick 2 or more PDFs to merge.');
+      return;
+    }
+    await _runConversion(() async => [await PdfConverter.mergePdfs(_pickedFiles)]);
+  }
+
+  Future<void> _splitPdfDialog() async {
+    if (_pickedFiles.isEmpty) return;
+    final startController = TextEditingController(text: '1');
+    final endController = TextEditingController(text: '1');
+    bool splitAllPages = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Split PDF'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CheckboxListTile(
+                value: splitAllPages,
+                title: const Text('Split into individual pages'),
+                onChanged: (v) =>
+                    setDialogState(() => splitAllPages = v ?? false),
+              ),
+              if (!splitAllPages) ...[
+                TextField(
+                  controller: startController,
+                  decoration: const InputDecoration(labelText: 'Start page'),
+                  keyboardType: TextInputType.number,
+                ),
+                TextField(
+                  controller: endController,
+                  decoration: const InputDecoration(labelText: 'End page'),
+                  keyboardType: TextInputType.number,
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Split'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
+    final file = _pickedFiles.first;
+    if (splitAllPages) {
+      await _runConversion(() => PdfConverter.splitPdfIntoPages(file));
+    } else {
+      final start = int.tryParse(startController.text) ?? 1;
+      final end = int.tryParse(endController.text) ?? 1;
+      await _runConversion(
+          () async => [await PdfConverter.splitPdfRange(file, start, end)]);
+    }
+  }
+
+  Future<void> _rotatePdfDialog() async {
+    if (_pickedFiles.isEmpty) return;
+    int angle = 90;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Rotate PDF'),
+          content: DropdownButton<int>(
+            value: angle,
+            isExpanded: true,
+            items: const [
+              DropdownMenuItem(value: 90, child: Text('90°')),
+              DropdownMenuItem(value: 180, child: Text('180°')),
+              DropdownMenuItem(value: 270, child: Text('270°')),
+            ],
+            onChanged: (v) => setDialogState(() => angle = v!),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Rotate'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
+    final file = _pickedFiles.first;
+    await _runConversion(() async => [await PdfConverter.rotatePdf(file, angle)]);
+  }
+
+  Future<void> _protectPdfDialog() async {
+    if (_pickedFiles.isEmpty) return;
+    final controller = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Password protect PDF'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Password'),
+          obscureText: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Protect'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || controller.text.isEmpty) return;
+
+    final file = _pickedFiles.first;
+    await _runConversion(
+        () async => [await PdfConverter.protectPdf(file, controller.text)]);
+  }
+
+  Future<void> _unlockPdfDialog() async {
+    if (_pickedFiles.isEmpty) return;
+    final controller = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Unlock PDF (enter current password)'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Password'),
+          obscureText: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Unlock'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || controller.text.isEmpty) return;
+
+    final file = _pickedFiles.first;
+    await _runConversion(
+        () async => [await PdfConverter.unlockPdf(file, controller.text)]);
+  }
+
+  Future<void> _resizeImageDialog() async {
+    if (_pickedFiles.isEmpty) return;
+    final widthController = TextEditingController();
+    final heightController = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Resize image'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: widthController,
+              decoration: const InputDecoration(labelText: 'Width (px)'),
+              keyboardType: TextInputType.number,
+            ),
+            TextField(
+              controller: heightController,
+              decoration: const InputDecoration(labelText: 'Height (px)'),
+              keyboardType: TextInputType.number,
+            ),
+            const Text(
+              'Leave one blank to keep aspect ratio.',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Resize'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final width = int.tryParse(widthController.text);
+    final height = int.tryParse(heightController.text);
+    if (width == null && height == null) return;
+
+    await _runConversion(() async {
+      final outs = <File>[];
+      for (final f in _pickedFiles) {
+        final out = await ImageConverter.resize(f, width: width, height: height);
+        if (out != null) outs.add(out);
+      }
+      return outs;
+    });
+  }
+
+  Future<void> _compressImageDialog() async {
+    if (_pickedFiles.isEmpty) return;
+    int localQuality = 70;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Compress image'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Quality: $localQuality%'),
+              Slider(
+                value: localQuality.toDouble(),
+                min: 10,
+                max: 100,
+                divisions: 18,
+                label: '$localQuality%',
+                onChanged: (v) =>
+                    setDialogState(() => localQuality = v.round()),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Compress'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
+    await _runConversion(() async {
+      final outs = <File>[];
+      for (final f in _pickedFiles) {
+        final out = await ImageConverter.compress(f, quality: localQuality);
+        if (out != null) outs.add(out);
+      }
+      return outs;
+    });
   }
 
   @override
@@ -312,6 +677,12 @@ class _HomePageState extends State<HomePage> {
               _btn('GIF', () => _convertTo('gif', ConverterType.image)),
             ]),
             const SizedBox(height: 16),
+            const Text('Image Tools', style: TextStyle(fontWeight: FontWeight.bold)),
+            Wrap(spacing: 8, children: [
+              _btn('Resize', _resizeImageDialog),
+              _btn('Compress', _compressImageDialog),
+            ]),
+            const SizedBox(height: 16),
             const Text('Documents', style: TextStyle(fontWeight: FontWeight.bold)),
             Wrap(spacing: 8, children: [
               _btn('CSV → JSON', () => _convertTo('', ConverterType.csvToJson)),
@@ -335,6 +706,15 @@ class _HomePageState extends State<HomePage> {
               _btn('Image → PDF', () => _convertTo('', ConverterType.imageToPdf)),
               _btn('PDF → Text', () => _convertTo('', ConverterType.pdfToText)),
               _btn('Text → PDF', () => _convertTo('', ConverterType.textToPdf)),
+            ]),
+            const SizedBox(height: 8),
+            const Text('PDF Tools', style: TextStyle(fontWeight: FontWeight.bold)),
+            Wrap(spacing: 8, children: [
+              _btn('Merge (2+ PDFs)', _mergePdfsAction),
+              _btn('Split', _splitPdfDialog),
+              _btn('Rotate', _rotatePdfDialog),
+              _btn('Protect', _protectPdfDialog),
+              _btn('Unlock', _unlockPdfDialog),
             ]),
             const SizedBox(height: 16),
             const Text('Notebook', style: TextStyle(fontWeight: FontWeight.bold)),
