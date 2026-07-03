@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:image/image.dart' as img;
 
 /// Page size presets, in points (1 cm = 28.3465 pt).
-enum PdfPageSize { a4, letter, a5, actualSizeFromDpi }
+enum PdfPageSize { a4, letter, a5, custom, actualSizeFromDpi }
 
 /// How the image should be placed on the page.
 enum PdfFitMode { fitPage, actualSize }
@@ -18,8 +18,11 @@ class PdfConverter {
   ///
   /// - [marginCm]: page margin on all sides, in centimeters.
   /// - [quality]: JPEG re-encode quality 1-100 (lower = smaller file size).
-  /// - [pageSize]: A4 / Letter / A5, or actualSizeFromDpi to make the PDF
-  ///   page exactly match the image's physical print size at [dpi].
+  /// - [pageSize]: A4 / Letter / A5 / custom (uses [customWidthCm] and
+  ///   [customHeightCm]), or actualSizeFromDpi to make the PDF page
+  ///   exactly match the image's physical print size at [dpi].
+  /// - [customWidthCm] / [customHeightCm]: page dimensions in centimeters,
+  ///   only used when pageSize is PdfPageSize.custom.
   /// - [fitMode]: fitPage scales the image to fill the page (minus
   ///   margins) preserving aspect ratio; actualSize places the image at
   ///   its true physical size (pixels / dpi), useful for scans that need
@@ -31,6 +34,8 @@ class PdfConverter {
     double marginCm = 1.0,
     int quality = 90,
     PdfPageSize pageSize = PdfPageSize.a4,
+    double customWidthCm = 21.0,
+    double customHeightCm = 29.7,
     PdfFitMode fitMode = PdfFitMode.fitPage,
     double dpi = 300,
   }) async {
@@ -58,6 +63,15 @@ class PdfConverter {
           imgWidthPt + marginPt * 2,
           imgHeightPt + marginPt * 2,
           marginAll: marginPt,
+        );
+      } else if (pageSize == PdfPageSize.custom) {
+        format = PdfPageFormat(
+          customWidthCm * PdfPageFormat.cm,
+          customHeightCm * PdfPageFormat.cm,
+          marginLeft: marginPt,
+          marginRight: marginPt,
+          marginTop: marginPt,
+          marginBottom: marginPt,
         );
       } else {
         final base = switch (pageSize) {
@@ -138,6 +152,105 @@ class PdfConverter {
     final outFile = File('${dir.path}/merged.pdf');
     await outFile.writeAsBytes(await finalDoc.save());
     finalDoc.dispose();
+    return outFile;
+  }
+
+  /// Extracts a page range (1-indexed, inclusive) into a new PDF.
+  static Future<File> splitPdfRange(
+    File pdfFile,
+    int startPage,
+    int endPage,
+  ) async {
+    final bytes = await pdfFile.readAsBytes();
+    final srcDoc = sf.PdfDocument(inputBytes: bytes);
+    final newDoc = sf.PdfDocument();
+
+    final start = startPage.clamp(1, srcDoc.pages.count);
+    final end = endPage.clamp(1, srcDoc.pages.count);
+
+    for (int i = start - 1; i <= end - 1; i++) {
+      final template = srcDoc.pages[i].createTemplate();
+      newDoc.pages.add().graphics.drawPdfTemplate(template, const Offset(0, 0));
+    }
+    srcDoc.dispose();
+
+    final dir = await getApplicationDocumentsDirectory();
+    final outFile = File('${dir.path}/split_${start}_$end.pdf');
+    await outFile.writeAsBytes(await newDoc.save());
+    newDoc.dispose();
+    return outFile;
+  }
+
+  /// Splits every page of a PDF into its own separate single-page PDF file.
+  static Future<List<File>> splitPdfIntoPages(File pdfFile) async {
+    final bytes = await pdfFile.readAsBytes();
+    final srcDoc = sf.PdfDocument(inputBytes: bytes);
+    final dir = await getApplicationDocumentsDirectory();
+    final results = <File>[];
+
+    for (int i = 0; i < srcDoc.pages.count; i++) {
+      final newDoc = sf.PdfDocument();
+      final template = srcDoc.pages[i].createTemplate();
+      newDoc.pages.add().graphics.drawPdfTemplate(template, const Offset(0, 0));
+      final outFile = File('${dir.path}/page_${i + 1}.pdf');
+      await outFile.writeAsBytes(await newDoc.save());
+      newDoc.dispose();
+      results.add(outFile);
+    }
+    srcDoc.dispose();
+    return results;
+  }
+
+  /// Rotates every page in the PDF by the given angle (must be 90, 180,
+  /// or 270 degrees).
+  static Future<File> rotatePdf(File pdfFile, int degrees) async {
+    final bytes = await pdfFile.readAsBytes();
+    final document = sf.PdfDocument(inputBytes: bytes);
+
+    final angle = switch (degrees % 360) {
+      90 => sf.PdfPageRotateAngle.rotateAngle90,
+      180 => sf.PdfPageRotateAngle.rotateAngle180,
+      270 => sf.PdfPageRotateAngle.rotateAngle270,
+      _ => sf.PdfPageRotateAngle.rotateAngle0,
+    };
+
+    for (int i = 0; i < document.pages.count; i++) {
+      document.pages[i].rotation = angle;
+    }
+
+    final dir = await getApplicationDocumentsDirectory();
+    final outFile = File('${dir.path}/rotated.pdf');
+    await outFile.writeAsBytes(await document.save());
+    document.dispose();
+    return outFile;
+  }
+
+  /// Adds password protection to a PDF. The same password is used to
+  /// both open (user password) and edit (owner password) the file.
+  static Future<File> protectPdf(File pdfFile, String password) async {
+    final bytes = await pdfFile.readAsBytes();
+    final document = sf.PdfDocument(inputBytes: bytes);
+
+    document.security.userPassword = password;
+    document.security.ownerPassword = password;
+
+    final dir = await getApplicationDocumentsDirectory();
+    final outFile = File('${dir.path}/protected.pdf');
+    await outFile.writeAsBytes(await document.save());
+    document.dispose();
+    return outFile;
+  }
+
+  /// Removes password protection from a PDF (you must supply the
+  /// current password to open it).
+  static Future<File> unlockPdf(File pdfFile, String password) async {
+    final bytes = await pdfFile.readAsBytes();
+    final document = sf.PdfDocument(inputBytes: bytes, password: password);
+
+    final dir = await getApplicationDocumentsDirectory();
+    final outFile = File('${dir.path}/unlocked.pdf');
+    await outFile.writeAsBytes(await document.save());
+    document.dispose();
     return outFile;
   }
 
