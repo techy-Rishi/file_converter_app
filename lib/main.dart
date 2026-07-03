@@ -645,6 +645,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final detected = _detectedCategory();
     return Scaffold(
       appBar: AppBar(
         title: const Text('ConvertKaro'),
@@ -656,83 +657,141 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ElevatedButton.icon(
-              onPressed: _pickFile,
-              icon: const Icon(Icons.file_open),
-              label: Text(_pickedFiles.isEmpty
-                  ? 'Pick file(s)'
-                  : '${_pickedFiles.length} file(s) selected'),
-            ),
-            const SizedBox(height: 20),
-            const Text('Images', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('PNG', () => _convertTo('png', ConverterType.image)),
-              _btn('JPG', () => _convertTo('jpg', ConverterType.image)),
-              _btn('BMP', () => _convertTo('bmp', ConverterType.image)),
-              _btn('GIF', () => _convertTo('gif', ConverterType.image)),
-            ]),
-            const SizedBox(height: 16),
-            const Text('Image Tools', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('Resize', _resizeImageDialog),
-              _btn('Compress', _compressImageDialog),
-            ]),
-            const SizedBox(height: 16),
-            const Text('Documents', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('CSV → JSON', () => _convertTo('', ConverterType.csvToJson)),
-              _btn('JSON → CSV', () => _convertTo('', ConverterType.jsonToCsv)),
-              _btn('CSV → XLSX', () => _convertTo('', ConverterType.csvToXlsx)),
-              _btn('XLSX → CSV', () => _convertTo('', ConverterType.xlsxToCsv)),
-            ]),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Text('PDF', style: TextStyle(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.settings, size: 20),
-                  tooltip: 'Image → PDF settings',
-                  onPressed: _showPdfSettingsDialog,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _pickFile,
+                      icon: const Icon(Icons.file_open),
+                      label: Text(_pickedFiles.isEmpty
+                          ? 'Pick file(s)'
+                          : '${_pickedFiles.length} file(s) selected'),
+                    ),
+                  ),
+                  if (_pickedFiles.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.clear),
+                      tooltip: 'Clear selection',
+                      onPressed: _clearSelection,
+                    ),
+                  ],
+                ],
+              ),
+              if (_pickedFiles.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _pickedFiles
+                      .map((f) => Chip(
+                            label: Text(
+                              f.uri.pathSegments.last,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ))
+                      .toList(),
                 ),
               ],
-            ),
-            Wrap(spacing: 8, children: [
-              _btn('Image → PDF', () => _convertTo('', ConverterType.imageToPdf)),
-              _btn('PDF → Text', () => _convertTo('', ConverterType.pdfToText)),
-              _btn('Text → PDF', () => _convertTo('', ConverterType.textToPdf)),
-            ]),
-            const SizedBox(height: 8),
-            const Text('PDF Tools', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('Merge (2+ PDFs)', _mergePdfsAction),
-              _btn('Split', _splitPdfDialog),
-              _btn('Rotate', _rotatePdfDialog),
-              _btn('Protect', _protectPdfDialog),
-              _btn('Unlock', _unlockPdfDialog),
-            ]),
-            const SizedBox(height: 16),
-            const Text('Notebook', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('ipynb → PDF', () => _convertTo('', ConverterType.ipynbToPdf)),
-            ]),
-            const SizedBox(height: 16),
-            const Text('Word', style: TextStyle(fontWeight: FontWeight.bold)),
-            Wrap(spacing: 8, children: [
-              _btn('Word → PDF', () => _convertTo('', ConverterType.wordToPdf)),
-              _btn('PDF → Word', () => _convertTo('', ConverterType.pdfToWord)),
-              _btn('Word → Text', () => _convertTo('', ConverterType.wordToText)),
-              _btn('Text → Word', () => _convertTo('', ConverterType.textToWord)),
-            ]),
-            const SizedBox(height: 24),
-            if (_busy) const CircularProgressIndicator(),
-            if (_status != null) Text(_status!),
-          ],
+              if (detected != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.auto_awesome, size: 18, color: Colors.indigo),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(detected,
+                            style: const TextStyle(fontSize: 12.5)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              const Text('Images', style: TextStyle(fontWeight: FontWeight.bold)),
+              Wrap(spacing: 8, children: [
+                _btn('PNG', () => _convertTo('png', ConverterType.image)),
+                _btn('JPG', () => _convertTo('jpg', ConverterType.image)),
+                _btn('BMP', () => _convertTo('bmp', ConverterType.image)),
+                _btn('GIF', () => _convertTo('gif', ConverterType.image)),
+              ]),
+              const SizedBox(height: 16),
+              const Text('Image Tools', style: TextStyle(fontWeight: FontWeight.bold)),
+              Wrap(spacing: 8, children: [
+                _btn('Resize', _resizeImageDialog),
+                _btn('Compress', _compressImageDialog),
+              ]),
+              const SizedBox(height: 16),
+              const Text('Documents', style: TextStyle(fontWeight: FontWeight.bold)),
+              Wrap(spacing: 8, children: [
+                _btn('CSV → JSON', () => _convertTo('', ConverterType.csvToJson)),
+                _btn('JSON → CSV', () => _convertTo('', ConverterType.jsonToCsv)),
+                _btn('CSV → XLSX', () => _convertTo('', ConverterType.csvToXlsx)),
+                _btn('XLSX → CSV', () => _convertTo('', ConverterType.xlsxToCsv)),
+              ]),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Text('PDF', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.settings, size: 20),
+                    tooltip: 'Image → PDF settings',
+                    onPressed: _showPdfSettingsDialog,
+                  ),
+                ],
+              ),
+              Wrap(spacing: 8, children: [
+                _btn('Image → PDF', () => _convertTo('', ConverterType.imageToPdf)),
+                _btn('PDF → Text', () => _convertTo('', ConverterType.pdfToText)),
+                _btn('Text → PDF', () => _convertTo('', ConverterType.textToPdf)),
+              ]),
+              const SizedBox(height: 8),
+              const Text('PDF Tools', style: TextStyle(fontWeight: FontWeight.bold)),
+              Wrap(spacing: 8, children: [
+                _btn('Merge (2+ PDFs)', _mergePdfsAction),
+                _btn('Split', _splitPdfDialog),
+                _btn('Rotate', _rotatePdfDialog),
+                _btn('Protect', _protectPdfDialog),
+                _btn('Unlock', _unlockPdfDialog),
+              ]),
+              const SizedBox(height: 16),
+              const Text('Notebook', style: TextStyle(fontWeight: FontWeight.bold)),
+              Wrap(spacing: 8, children: [
+                _btn('ipynb → PDF', () => _convertTo('', ConverterType.ipynbToPdf)),
+              ]),
+              const SizedBox(height: 16),
+              const Text('Word', style: TextStyle(fontWeight: FontWeight.bold)),
+              Wrap(spacing: 8, children: [
+                _btn('Word → PDF', () => _convertTo('', ConverterType.wordToPdf)),
+                _btn('PDF → Word', () => _convertTo('', ConverterType.pdfToWord)),
+                _btn('Word → Text', () => _convertTo('', ConverterType.wordToText)),
+                _btn('Text → Word', () => _convertTo('', ConverterType.textToWord)),
+              ]),
+              const SizedBox(height: 24),
+              if (_busy) const Center(child: CircularProgressIndicator()),
+              if (_status != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_status!, textAlign: TextAlign.center),
+                ),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
@@ -743,6 +802,31 @@ class _HomePageState extends State<HomePage> {
       onPressed: _pickedFiles.isEmpty || _busy ? null : onPressed,
       child: Text(label),
     );
+  }
+
+  /// Guesses a friendly category name from the first picked file's
+  /// extension, used to show a "Suggested for you" hint.
+  String? _detectedCategory() {
+    if (_pickedFiles.isEmpty) return null;
+    final ext = _pickedFiles.first.path.split('.').last.toLowerCase();
+    if (['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'].contains(ext)) {
+      return 'Image file detected — try Image tools or Image → PDF below';
+    }
+    if (ext == 'pdf') return 'PDF detected — try PDF Tools below';
+    if (ext == 'docx') return 'Word document detected — try Word tools below';
+    if (ext == 'csv') return 'CSV detected — try Documents below';
+    if (ext == 'json') return 'JSON detected — try Documents below';
+    if (ext == 'xlsx') return 'Spreadsheet detected — try Documents below';
+    if (ext == 'ipynb') return 'Jupyter Notebook detected — try Notebook below';
+    if (ext == 'txt') return 'Text file detected — try Text → PDF/Word below';
+    return null;
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _pickedFiles = [];
+      _status = null;
+    });
   }
 }
 
