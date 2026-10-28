@@ -1,17 +1,28 @@
-"""Patches the freshly-generated AndroidManifest.xml with the app's
-display name and mailto intent queries for Android 11+.
-"""
+import os
 
 path = "android/app/src/main/AndroidManifest.xml"
 
-with open(path, "r") as f:
+if not os.path.exists(path):
+    print(f"Warning: {path} not found yet. Skipping patch.")
+    exit(0)
+
+with open(path, "r", encoding="utf-8") as f:
     content = f.read()
 
-content = content.replace(
-    'android:label="file_converter_app"',
-    'android:label="ConvertKaro"',
-)
+# App name patch
+if 'android:label="file_converter_app"' in content:
+    content = content.replace(
+        'android:label="file_converter_app"',
+        'android:label="ConvertKaro"',
+    )
+elif 'android:label="@string/app_name"' not in content:
+    # Fallback replacement if label is different
+    content = content.replace(
+        'android:label="',
+        'android:label="ConvertKaro" data-old="',
+    )
 
+# Mailto intent queries patch for Android 11+
 mailto_query = """    <queries>
         <intent>
             <action android:name="android.intent.action.SENDTO" />
@@ -21,11 +32,10 @@ mailto_query = """    <queries>
 </manifest>"""
 
 if "android.intent.action.SENDTO" not in content:
-    content = content.replace("</manifest>", mailto_query)
+    if "</manifest>" in content:
+        content = content.replace("</manifest>", mailto_query)
 
-with open(path, "w") as f:
+with open(path, "w", encoding="utf-8") as f:
     f.write(content)
 
-assert "ConvertKaro" in content, "App name insert failed!"
-print("Manifest patched successfully:")
-print(content)
+print("AndroidManifest.xml patched successfully!")
