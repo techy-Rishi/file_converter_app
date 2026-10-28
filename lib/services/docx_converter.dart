@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:xml/xml.dart' as xml;
@@ -5,15 +6,15 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
-/// Converts between .docx (Word) and .pdf / .txt.
-///
-/// NOTE: This is a TEXT-ONLY converter. It preserves paragraphs but not
-/// fonts, images, tables, or complex layout. For pixel-perfect conversion
-/// (keeping original formatting), see the CloudConvert option in
-/// STEPS.md — this offline version is for when content matters more
-/// than exact appearance, and needs no internet or paid API.
+/// Converts between .docx (Word) and .pdf / .txt with full UTF-8 support.
 class DocxConverter {
-  /// Extracts plain text paragraphs from a .docx file
+  static String _baseName(File file) {
+    final name = file.uri.pathSegments.last;
+    final dot = name.lastIndexOf('.');
+    return dot == -1 ? name : name.substring(0, dot);
+  }
+
+  /// Extracts plain text paragraphs from a .docx file properly using UTF-8
   static Future<List<String>> _readDocxParagraphs(File docxFile) async {
     final bytes = await docxFile.readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -22,7 +23,9 @@ class DocxConverter {
       (f) => f.name == 'word/document.xml',
       orElse: () => throw Exception('Not a valid .docx file'),
     );
-    final xmlString = String.fromCharCodes(docXmlFile.content);
+
+    final contentBytes = docXmlFile.content as List<int>;
+    final xmlString = utf8.decode(contentBytes, allowMalformed: true);
     final document = xml.XmlDocument.parse(xmlString);
 
     final paragraphs = <String>[];
@@ -34,13 +37,15 @@ class DocxConverter {
     return paragraphs;
   }
 
-  /// Builds a minimal valid .docx file from plain text lines
+  /// Builds a valid UTF-8 .docx file from plain text lines
   static Future<File> _writeDocx(List<String> paragraphs, String outPath) async {
     final paragraphXml = paragraphs.map((line) {
       final escaped = line
           .replaceAll('&', '&amp;')
           .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;');
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&apos;');
       return '<w:p><w:r><w:t xml:space="preserve">$escaped</w:t></w:r></w:p>';
     }).join();
 
@@ -61,13 +66,14 @@ class DocxConverter {
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>''';
 
+    final ctBytes = utf8.encode(contentTypesXml);
+    final relsBytes = utf8.encode(relsXml);
+    final docBytes = utf8.encode(documentXml);
+
     final archive = Archive();
-    archive.addFile(ArchiveFile('[Content_Types].xml', contentTypesXml.length,
-        contentTypesXml.codeUnits));
-    archive.addFile(ArchiveFile(
-        '_rels/.rels', relsXml.length, relsXml.codeUnits));
-    archive.addFile(ArchiveFile(
-        'word/document.xml', documentXml.length, documentXml.codeUnits));
+    archive.addFile(ArchiveFile('[Content_Types].xml', ctBytes.length, ctBytes));
+    archive.addFile(ArchiveFile('_rels/.rels', relsBytes.length, relsBytes));
+    archive.addFile(ArchiveFile('word/document.xml', docBytes.length, docBytes));
 
     final zipBytes = ZipEncoder().encode(archive)!;
     final outFile = File(outPath);
@@ -84,14 +90,14 @@ class DocxConverter {
         build: (context) => paragraphs
             .map((p) => pw.Padding(
                   padding: const pw.EdgeInsets.only(bottom: 6),
-                  child: pw.Text(p),
+                  child: pw.Text(p.isEmpty ? ' ' : p),
                 ))
             .toList(),
       ),
     );
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/converted.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(docxFile)}.pdf');
     await outFile.writeAsBytes(await doc.save());
     return outFile;
   }
@@ -102,21 +108,22 @@ class DocxConverter {
     final document = PdfDocument(inputBytes: bytes);
 
     final paragraphs = <String>[];
+    final extractor = PdfTextExtractor(document);
     for (int i = 0; i < document.pages.count; i++) {
-      final text = PdfTextExtractor(document).extractText(startPageIndex: i);
+      final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
       paragraphs.addAll(text.split('\n'));
     }
     document.dispose();
 
-    final dir = await getApplicationDocumentsDirectory();
-    return _writeDocx(paragraphs, '${dir.path}/converted.docx');
+    final dir = await getTemporaryDirectory();
+    return _writeDocx(paragraphs, '${dir.path}/${_baseName(pdfFile)}.docx');
   }
 
   /// Word (.docx) -> plain .txt
   static Future<File> wordToText(File docxFile) async {
     final paragraphs = await _readDocxParagraphs(docxFile);
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/converted.txt');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(docxFile)}.txt');
     await outFile.writeAsString(paragraphs.join('\n'));
     return outFile;
   }
@@ -124,8 +131,8 @@ class DocxConverter {
   /// Plain .txt -> Word (.docx)
   static Future<File> textToWord(File txtFile) async {
     final content = await txtFile.readAsString();
-    final paragraphs = content.split('\n');
-    final dir = await getApplicationDocumentsDirectory();
-    return _writeDocx(paragraphs, '${dir.path}/converted.docx');
+    final paragraphs = content.replaceAll('\r\n', '\n').split('\n');
+    final dir = await getTemporaryDirectory();
+    return _writeDocx(paragraphs, '${dir.path}/${_baseName(txtFile)}.docx');
   }
 }
