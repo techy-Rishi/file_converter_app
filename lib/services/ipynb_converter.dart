@@ -4,11 +4,20 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 
-/// Converts a Jupyter Notebook (.ipynb) file into a readable PDF,
-/// rendering markdown cells as text and code cells (with their outputs)
-/// in a monospaced, shaded block - similar to Jupyter's own "Export as
-/// PDF" or "Print Preview" output.
+/// Converts a Jupyter Notebook (.ipynb) file into PDF or Python/Text script.
 class IpynbConverter {
+  static String _baseName(File file) {
+    final name = file.uri.pathSegments.last;
+    final dot = name.lastIndexOf('.');
+    return dot == -1 ? name : name.substring(0, dot);
+  }
+
+  static String _joinSource(dynamic source) {
+    if (source is List) return source.map((e) => e.toString()).join();
+    if (source is String) return source;
+    return '';
+  }
+
   static Future<File> ipynbToPdf(File ipynbFile) async {
     final content = await ipynbFile.readAsString();
     final notebook = jsonDecode(content) as Map<String, dynamic>;
@@ -17,21 +26,15 @@ class IpynbConverter {
     final doc = pw.Document();
     final codeFont = pw.Font.courier();
 
-    String joinSource(dynamic source) {
-      if (source is List) return source.map((e) => e.toString()).join();
-      if (source is String) return source;
-      return '';
-    }
-
     String extractOutputText(Map<String, dynamic> output) {
       final buffer = StringBuffer();
       final type = output['output_type'];
       if (type == 'stream') {
-        buffer.write(joinSource(output['text']));
+        buffer.write(_joinSource(output['text']));
       } else if (type == 'execute_result' || type == 'display_data') {
         final data = output['data'] as Map<String, dynamic>?;
         if (data != null && data['text/plain'] != null) {
-          buffer.write(joinSource(data['text/plain']));
+          buffer.write(_joinSource(data['text/plain']));
         }
       } else if (type == 'error') {
         final traceback = output['traceback'];
@@ -47,7 +50,7 @@ class IpynbConverter {
 
     for (final cell in cells) {
       final cellType = cell['cell_type'];
-      final source = joinSource(cell['source']);
+      final source = _joinSource(cell['source']);
       if (source.trim().isEmpty) continue;
 
       if (cellType == 'markdown') {
@@ -68,7 +71,7 @@ class IpynbConverter {
               borderRadius: pw.BorderRadius.circular(4),
             ),
             child: pw.Text(
-              'In [${execCount++}]: $source',
+              'In [${execCount++}]:\n$source',
               style: pw.TextStyle(font: codeFont, fontSize: 9),
             ),
           ),
@@ -101,13 +104,45 @@ class IpynbConverter {
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        build: (context) => widgets,
+        build: (context) =>
+            widgets.isEmpty ? [pw.Text('Empty notebook')] : widgets,
       ),
     );
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/notebook.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(ipynbFile)}.pdf');
     await outFile.writeAsBytes(await doc.save());
+    return outFile;
+  }
+
+  /// Jupyter Notebook (.ipynb) -> Python script (.py)
+  static Future<File> ipynbToPython(File ipynbFile) async {
+    final content = await ipynbFile.readAsString();
+    final notebook = jsonDecode(content) as Map<String, dynamic>;
+    final cells = (notebook['cells'] as List?) ?? [];
+
+    final buffer = StringBuffer();
+    int cellNum = 1;
+    for (final cell in cells) {
+      final cellType = cell['cell_type'];
+      final source = _joinSource(cell['source']).trim();
+      if (source.isEmpty) continue;
+
+      if (cellType == 'markdown') {
+        for (final line in source.split('\n')) {
+          buffer.writeln('# $line');
+        }
+        buffer.writeln();
+      } else if (cellType == 'code') {
+        buffer.writeln('# %% [Cell ${cellNum++}]');
+        buffer.writeln(source);
+        buffer.writeln();
+      }
+    }
+
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(ipynbFile)}.py');
+    await outFile.writeAsString(buffer.toString());
     return outFile;
   }
 }
