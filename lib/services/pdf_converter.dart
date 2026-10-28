@@ -14,21 +14,27 @@ enum PdfFitMode { fitPage, actualSize }
 
 /// Handles all PDF-related conversions.
 class PdfConverter {
+  static String _baseName(File file) {
+    final name = file.uri.pathSegments.last;
+    final dot = name.lastIndexOf('.');
+    return dot == -1 ? name : name.substring(0, dot);
+  }
+
+  /// Copies a page from [srcPage] into [targetDoc] while preserving exact
+  /// dimensions, orientation, and zero extra margins.
+  static void _copyPageExact(sf.PdfPage srcPage, sf.PdfDocument targetDoc) {
+    final template = srcPage.createTemplate();
+    final section = targetDoc.sections!.add();
+    section.pageSettings.margins.all = 0;
+    section.pageSettings.size = srcPage.size;
+    section.pageSettings.orientation =
+        srcPage.size.width > srcPage.size.height
+            ? sf.PdfPageOrientation.landscape
+            : sf.PdfPageOrientation.portrait;
+    section.pages.add().graphics.drawPdfTemplate(template, Offset.zero);
+  }
+
   /// One or more images -> single PDF, with full control over layout.
-  ///
-  /// - [marginCm]: page margin on all sides, in centimeters.
-  /// - [quality]: JPEG re-encode quality 1-100 (lower = smaller file size).
-  /// - [pageSize]: A4 / Letter / A5 / custom (uses [customWidthCm] and
-  ///   [customHeightCm]), or actualSizeFromDpi to make the PDF page
-  ///   exactly match the image's physical print size at [dpi].
-  /// - [customWidthCm] / [customHeightCm]: page dimensions in centimeters,
-  ///   only used when pageSize is PdfPageSize.custom.
-  /// - [fitMode]: fitPage scales the image to fill the page (minus
-  ///   margins) preserving aspect ratio; actualSize places the image at
-  ///   its true physical size (pixels / dpi), useful for scans that need
-  ///   to print at exact scale.
-  /// - [dpi]: only used when pageSize is actualSizeFromDpi or fitMode is
-  ///   actualSize. Standard scan/print DPI is 300; screenshots are ~96.
   static Future<File> imagesToPdf(
     List<File> imageFiles, {
     double marginCm = 1.0,
@@ -47,13 +53,9 @@ class PdfConverter {
       final decoded = img.decodeImage(rawBytes);
       if (decoded == null) continue;
 
-      // Re-encode as JPEG at the chosen quality - this is what actually
-      // controls output file size, same as "quality" sliders in most
-      // official PDF/image converter apps.
       final jpegBytes = img.encodeJpg(decoded, quality: quality.clamp(1, 100));
       final pdfImage = pw.MemoryImage(jpegBytes);
 
-      // Physical size of the image at the given DPI, in points.
       final imgWidthPt = (decoded.width / dpi) * PdfPageFormat.inch;
       final imgHeightPt = (decoded.height / dpi) * PdfPageFormat.inch;
 
@@ -109,8 +111,11 @@ class PdfConverter {
       );
     }
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/converted.pdf');
+    final dir = await getTemporaryDirectory();
+    final name = imageFiles.length == 1
+        ? _baseName(imageFiles.first)
+        : 'images_${imageFiles.length}';
+    final outFile = File('${dir.path}/$name.pdf');
     await outFile.writeAsBytes(await doc.save());
     return outFile;
   }
@@ -121,20 +126,21 @@ class PdfConverter {
     final document = sf.PdfDocument(inputBytes: bytes);
 
     final buffer = StringBuffer();
+    final extractor = sf.PdfTextExtractor(document);
     for (int i = 0; i < document.pages.count; i++) {
-      final text = sf.PdfTextExtractor(document).extractText(startPageIndex: i);
+      final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
       buffer.writeln(text);
       buffer.writeln('--- Page ${i + 1} end ---');
     }
     document.dispose();
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/extracted.txt');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(pdfFile)}.txt');
     await outFile.writeAsString(buffer.toString());
     return outFile;
   }
 
-  /// Merge multiple PDFs into one
+  /// Merge multiple PDFs into one (preserving exact page sizes)
   static Future<File> mergePdfs(List<File> pdfFiles) async {
     final sf.PdfDocument finalDoc = sf.PdfDocument();
 
@@ -142,14 +148,13 @@ class PdfConverter {
       final bytes = await file.readAsBytes();
       final srcDoc = sf.PdfDocument(inputBytes: bytes);
       for (int i = 0; i < srcDoc.pages.count; i++) {
-        final template = srcDoc.pages[i].createTemplate();
-        finalDoc.pages.add().graphics.drawPdfTemplate(template, const Offset(0, 0));
+        _copyPageExact(srcDoc.pages[i], finalDoc);
       }
       srcDoc.dispose();
     }
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/merged.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/merged_${pdfFiles.length}_files.pdf');
     await outFile.writeAsBytes(await finalDoc.save());
     finalDoc.dispose();
     return outFile;
@@ -165,17 +170,20 @@ class PdfConverter {
     final srcDoc = sf.PdfDocument(inputBytes: bytes);
     final newDoc = sf.PdfDocument();
 
-    final start = startPage.clamp(1, srcDoc.pages.count);
-    final end = endPage.clamp(1, srcDoc.pages.count);
+    final count = srcDoc.pages.count;
+    final a = startPage.clamp(1, count);
+    final b = endPage.clamp(1, count);
+    final start = a <= b ? a : b;
+    final end = a <= b ? b : a;
 
     for (int i = start - 1; i <= end - 1; i++) {
-      final template = srcDoc.pages[i].createTemplate();
-      newDoc.pages.add().graphics.drawPdfTemplate(template, const Offset(0, 0));
+      _copyPageExact(srcDoc.pages[i], newDoc);
     }
     srcDoc.dispose();
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/split_${start}_$end.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile =
+        File('${dir.path}/${_baseName(pdfFile)}_pages_${start}_to_$end.pdf');
     await outFile.writeAsBytes(await newDoc.save());
     newDoc.dispose();
     return outFile;
@@ -185,14 +193,14 @@ class PdfConverter {
   static Future<List<File>> splitPdfIntoPages(File pdfFile) async {
     final bytes = await pdfFile.readAsBytes();
     final srcDoc = sf.PdfDocument(inputBytes: bytes);
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getTemporaryDirectory();
     final results = <File>[];
+    final base = _baseName(pdfFile);
 
     for (int i = 0; i < srcDoc.pages.count; i++) {
       final newDoc = sf.PdfDocument();
-      final template = srcDoc.pages[i].createTemplate();
-      newDoc.pages.add().graphics.drawPdfTemplate(template, const Offset(0, 0));
-      final outFile = File('${dir.path}/page_${i + 1}.pdf');
+      _copyPageExact(srcDoc.pages[i], newDoc);
+      final outFile = File('${dir.path}/${base}_page_${i + 1}.pdf');
       await outFile.writeAsBytes(await newDoc.save());
       newDoc.dispose();
       results.add(outFile);
@@ -201,8 +209,7 @@ class PdfConverter {
     return results;
   }
 
-  /// Rotates every page in the PDF by the given angle (must be 90, 180,
-  /// or 270 degrees).
+  /// Rotates every page in the PDF by the given angle (90, 180, or 270).
   static Future<File> rotatePdf(File pdfFile, int degrees) async {
     final bytes = await pdfFile.readAsBytes();
     final document = sf.PdfDocument(inputBytes: bytes);
@@ -218,15 +225,14 @@ class PdfConverter {
       document.pages[i].rotation = angle;
     }
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/rotated.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(pdfFile)}_rotated.pdf');
     await outFile.writeAsBytes(await document.save());
     document.dispose();
     return outFile;
   }
 
-  /// Adds password protection to a PDF. The same password is used to
-  /// both open (user password) and edit (owner password) the file.
+  /// Adds password protection to a PDF.
   static Future<File> protectPdf(File pdfFile, String password) async {
     final bytes = await pdfFile.readAsBytes();
     final document = sf.PdfDocument(inputBytes: bytes);
@@ -234,38 +240,47 @@ class PdfConverter {
     document.security.userPassword = password;
     document.security.ownerPassword = password;
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/protected.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(pdfFile)}_protected.pdf');
     await outFile.writeAsBytes(await document.save());
     document.dispose();
     return outFile;
   }
 
-  /// Removes password protection from a PDF (you must supply the
-  /// current password to open it).
+  /// Removes password protection from a PDF.
   static Future<File> unlockPdf(File pdfFile, String password) async {
     final bytes = await pdfFile.readAsBytes();
     final document = sf.PdfDocument(inputBytes: bytes, password: password);
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/unlocked.pdf');
+    // Clear passwords so the saved PDF is actually unlocked!
+    document.security.userPassword = '';
+    document.security.ownerPassword = '';
+
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(pdfFile)}_unlocked.pdf');
     await outFile.writeAsBytes(await document.save());
     document.dispose();
     return outFile;
   }
 
-  /// Plain text -> PDF
+  /// Plain text -> PDF (handles multi-page text files without crashing)
   static Future<File> textToPdf(File txtFile) async {
     final content = await txtFile.readAsString();
+    final lines = content.replaceAll('\r\n', '\n').split('\n');
     final doc = pw.Document();
     doc.addPage(
       pw.MultiPage(
-        build: (context) => [pw.Text(content)],
+        build: (context) => lines
+            .map((line) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 4),
+                  child: pw.Text(line.isEmpty ? ' ' : line),
+                ))
+            .toList(),
       ),
     );
 
-    final dir = await getApplicationDocumentsDirectory();
-    final outFile = File('${dir.path}/converted.pdf');
+    final dir = await getTemporaryDirectory();
+    final outFile = File('${dir.path}/${_baseName(txtFile)}.pdf');
     await outFile.writeAsBytes(await doc.save());
     return outFile;
   }
