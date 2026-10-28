@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
 /// Converts, resizes, and compresses images on a background Isolate
-/// so the UI never freezes.
+/// so the UI never freezes. Supports exact target KB compression.
 class ImageConverter {
   static String _baseName(File file) {
     final name = file.uri.pathSegments.last;
@@ -117,6 +118,77 @@ class ImageConverter {
     final dir = await getTemporaryDirectory();
     final outFile = File(
       '${dir.path}/${_baseName(inputFile)}_q$quality.jpg',
+    );
+    await outFile.writeAsBytes(compressedBytes);
+    return outFile;
+  }
+
+  /// Compresses an image to fit under [targetKb] kilobytes using binary search
+  /// on JPEG quality, followed by progressive downscaling if needed.
+  static Future<File?> compressToTargetKb(
+    File inputFile, {
+    required int targetKb,
+  }) async {
+    final bytes = await inputFile.readAsBytes();
+    final targetBytes = targetKb * 1024;
+
+    final compressedBytes = await Isolate.run<List<int>?>(() {
+      final original = img.decodeImage(bytes);
+      if (original == null) return null;
+
+      img.Image currentImage = original;
+      List<int>? bestAttempt;
+
+      // Try up to 6 progressive downscale passes if quality alone isn't enough
+      for (int scaleStep = 0; scaleStep < 6; scaleStep++) {
+        int low = 8;
+        int high = 95;
+        List<int>? stepBest;
+
+        while (low <= high) {
+          final mid = (low + high) ~/ 2;
+          final encoded = img.encodeJpg(currentImage, quality: mid);
+          if (encoded.length <= targetBytes) {
+            stepBest = encoded;
+            low = mid + 1; // Try higher quality while staying under targetBytes
+          } else {
+            high = mid - 1;
+          }
+        }
+
+        if (stepBest != null) {
+          bestAttempt = stepBest;
+          break;
+        }
+
+        // Even at lowest quality (8), still larger than targetBytes -> scale down
+        final lowestAttempt = img.encodeJpg(currentImage, quality: 8);
+        bestAttempt = lowestAttempt;
+
+        final ratio = math.sqrt(targetBytes / lowestAttempt.length) * 0.9;
+        final newWidth = math.max(64, (currentImage.width * ratio).round());
+        final newHeight = math.max(64, (currentImage.height * ratio).round());
+
+        if (newWidth >= currentImage.width && newHeight >= currentImage.height) {
+          break;
+        }
+
+        currentImage = img.copyResize(
+          currentImage,
+          width: newWidth,
+          height: newHeight,
+          interpolation: img.Interpolation.average,
+        );
+      }
+
+      return bestAttempt;
+    });
+
+    if (compressedBytes == null) return null;
+
+    final dir = await getTemporaryDirectory();
+    final outFile = File(
+      '${dir.path}/${_baseName(inputFile)}_${targetKb}kb.jpg',
     );
     await outFile.writeAsBytes(compressedBytes);
     return outFile;
