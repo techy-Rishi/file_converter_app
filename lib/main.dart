@@ -1447,7 +1447,7 @@ class _HomePageState extends State<HomePage>
             () => _convertTo('', ConverterType.pdfToText),
             icon: Icons.notes_rounded,
           ),
-          _btn('Merge PDFs (2+)', _mergePdfsAction, icon: Icons.CallMerge_rounded),
+          _btn('Merge PDFs (2+)', _mergePdfsAction, icon: Icons.merge_type_rounded),
           _btn('Split PDF', _splitPdfDialog, icon: Icons.call_split_rounded),
           _btn('Rotate PDF', _rotatePdfDialog, icon: Icons.rotate_right_rounded),
           _btn('Protect (Lock)', _protectPdfDialog, icon: Icons.lock_outline_rounded),
