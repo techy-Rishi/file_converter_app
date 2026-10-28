@@ -12,7 +12,7 @@ enum PdfPageSize { a4, letter, a5, custom, actualSizeFromDpi }
 /// How the image should be placed on the page.
 enum PdfFitMode { fitPage, actualSize }
 
-/// Handles all PDF-related conversions.
+/// Handles all PDF-related conversions & compression.
 class PdfConverter {
   static String _baseName(File file) {
     final name = file.uri.pathSegments.last;
@@ -34,7 +34,7 @@ class PdfConverter {
     section.pages.add().graphics.drawPdfTemplate(template, Offset.zero);
   }
 
-  /// One or more images -> single PDF, with full control over layout.
+  /// One or more images -> single PDF, with full control over layout and optional target KB.
   static Future<File> imagesToPdf(
     List<File> imageFiles, {
     double marginCm = 1.0,
@@ -44,71 +44,105 @@ class PdfConverter {
     double customHeightCm = 29.7,
     PdfFitMode fitMode = PdfFitMode.fitPage,
     double dpi = 300,
+    int? targetKb,
   }) async {
-    final doc = pw.Document();
-    final marginPt = marginCm * PdfPageFormat.cm;
+    Future<List<int>> buildPdfBytes(int q, double scale) async {
+      final doc = pw.Document(compress: true);
+      final marginPt = marginCm * PdfPageFormat.cm;
 
-    for (final file in imageFiles) {
-      final rawBytes = await file.readAsBytes();
-      final decoded = img.decodeImage(rawBytes);
-      if (decoded == null) continue;
+      for (final file in imageFiles) {
+        final rawBytes = await file.readAsBytes();
+        var decoded = img.decodeImage(rawBytes);
+        if (decoded == null) continue;
 
-      final jpegBytes = img.encodeJpg(decoded, quality: quality.clamp(1, 100));
-      final pdfImage = pw.MemoryImage(jpegBytes);
+        if (scale < 0.99) {
+          decoded = img.copyResize(
+            decoded,
+            width: (decoded.width * scale).round().clamp(80, decoded.width),
+            interpolation: img.Interpolation.average,
+          );
+        }
 
-      final imgWidthPt = (decoded.width / dpi) * PdfPageFormat.inch;
-      final imgHeightPt = (decoded.height / dpi) * PdfPageFormat.inch;
+        final jpegBytes = img.encodeJpg(decoded, quality: q.clamp(5, 100));
+        final pdfImage = pw.MemoryImage(jpegBytes);
 
-      PdfPageFormat format;
-      if (pageSize == PdfPageSize.actualSizeFromDpi) {
-        format = PdfPageFormat(
-          imgWidthPt + marginPt * 2,
-          imgHeightPt + marginPt * 2,
-          marginAll: marginPt,
-        );
-      } else if (pageSize == PdfPageSize.custom) {
-        format = PdfPageFormat(
-          customWidthCm * PdfPageFormat.cm,
-          customHeightCm * PdfPageFormat.cm,
-          marginLeft: marginPt,
-          marginRight: marginPt,
-          marginTop: marginPt,
-          marginBottom: marginPt,
-        );
-      } else {
-        final base = switch (pageSize) {
-          PdfPageSize.letter => PdfPageFormat.letter,
-          PdfPageSize.a5 => PdfPageFormat.a5,
-          _ => PdfPageFormat.a4,
-        };
-        format = base.copyWith(
-          marginLeft: marginPt,
-          marginRight: marginPt,
-          marginTop: marginPt,
-          marginBottom: marginPt,
+        final imgWidthPt = (decoded.width / dpi) * PdfPageFormat.inch;
+        final imgHeightPt = (decoded.height / dpi) * PdfPageFormat.inch;
+
+        PdfPageFormat format;
+        if (pageSize == PdfPageSize.actualSizeFromDpi) {
+          format = PdfPageFormat(
+            imgWidthPt + marginPt * 2,
+            imgHeightPt + marginPt * 2,
+            marginAll: marginPt,
+          );
+        } else if (pageSize == PdfPageSize.custom) {
+          format = PdfPageFormat(
+            customWidthCm * PdfPageFormat.cm,
+            customHeightCm * PdfPageFormat.cm,
+            marginLeft: marginPt,
+            marginRight: marginPt,
+            marginTop: marginPt,
+            marginBottom: marginPt,
+          );
+        } else {
+          final base = switch (pageSize) {
+            PdfPageSize.letter => PdfPageFormat.letter,
+            PdfPageSize.a5 => PdfPageFormat.a5,
+            _ => PdfPageFormat.a4,
+          };
+          format = base.copyWith(
+            marginLeft: marginPt,
+            marginRight: marginPt,
+            marginTop: marginPt,
+            marginBottom: marginPt,
+          );
+        }
+
+        doc.addPage(
+          pw.Page(
+            pageFormat: format,
+            build: (context) {
+              if (fitMode == PdfFitMode.actualSize ||
+                  pageSize == PdfPageSize.actualSizeFromDpi) {
+                return pw.Center(
+                  child: pw.SizedBox(
+                    width: imgWidthPt,
+                    height: imgHeightPt,
+                    child: pw.Image(pdfImage, fit: pw.BoxFit.fill),
+                  ),
+                );
+              }
+              return pw.Center(
+                child: pw.Image(pdfImage, fit: pw.BoxFit.contain),
+              );
+            },
+          ),
         );
       }
+      return doc.save();
+    }
 
-      doc.addPage(
-        pw.Page(
-          pageFormat: format,
-          build: (context) {
-            if (fitMode == PdfFitMode.actualSize ||
-                pageSize == PdfPageSize.actualSizeFromDpi) {
-              return pw.Center(
-                child: pw.SizedBox(
-                  width: imgWidthPt,
-                  height: imgHeightPt,
-                  child: pw.Image(pdfImage, fit: pw.BoxFit.fill),
-                ),
-              );
-            }
-            return pw.Center(
-              child: pw.Image(pdfImage, fit: pw.BoxFit.contain),
-            );
-          },
-        ),
-      );
+    List<int> finalBytes;
+    if (targetKb != null && targetKb > 0) {
+      final targetBytes = targetKb * 1024;
+      finalBytes = await buildPdfBytes(quality, 1.0);
+
+      if (finalBytes.length > targetBytes) {
+        final presets = [
+          (65, 0.85),
+          (45, 0.70),
+          (30, 0.55),
+          (20, 0.40),
+          (12, 0.30),
+        ];
+        for (final p in presets) {
+          finalBytes = await buildPdfBytes(p.$1, p.$2);
+          if (finalBytes.length <= targetBytes) break;
+        }
+      }
+    } else {
+      finalBytes = await buildPdfBytes(quality, 1.0);
     }
 
     final dir = await getTemporaryDirectory();
@@ -116,7 +150,92 @@ class PdfConverter {
         ? _baseName(imageFiles.first)
         : 'images_${imageFiles.length}';
     final outFile = File('${dir.path}/$name.pdf');
-    await outFile.writeAsBytes(await doc.save());
+    await outFile.writeAsBytes(finalBytes);
+    return outFile;
+  }
+
+  /// Compresses an existing PDF using Syncfusion compression levels and/or
+  /// compact text/stream optimization to approach [targetKb].
+  static Future<File> compressPdf(
+    File pdfFile, {
+    int? targetKb,
+    int compressionPercent = 75, // 10..100 (higher = more compression)
+  }) async {
+    final originalBytes = await pdfFile.readAsBytes();
+    final targetBytes = targetKb != null ? targetKb * 1024 : null;
+
+    // Step 1: Maximum structural + stream compression via Syncfusion
+    final srcDoc = sf.PdfDocument(inputBytes: originalBytes);
+    srcDoc.compressionLevel = switch (compressionPercent) {
+      >= 75 => sf.PdfCompressionLevel.best,
+      >= 45 => sf.PdfCompressionLevel.aboveNormal,
+      _ => sf.PdfCompressionLevel.normal,
+    };
+
+    final optimizedDoc = sf.PdfDocument();
+    optimizedDoc.compressionLevel = sf.PdfCompressionLevel.best;
+    for (int i = 0; i < srcDoc.pages.count; i++) {
+      _copyPageExact(srcDoc.pages[i], optimizedDoc);
+    }
+
+    List<int> outBytes = await optimizedDoc.save();
+    optimizedDoc.dispose();
+
+    // Pick smaller of direct vs template-rebuilt
+    final directBytes = await srcDoc.save();
+    if (directBytes.length < outBytes.length) {
+      outBytes = directBytes;
+    }
+
+    // Step 2: If targetKb is strictly smaller than structural compression can reach
+    // and the PDF contains extractable text, offer ultra-compact text reconstruction
+    if (targetBytes != null && outBytes.length > targetBytes) {
+      final extractor = sf.PdfTextExtractor(srcDoc);
+      final pagesText = <String>[];
+      int totalChars = 0;
+      for (int i = 0; i < srcDoc.pages.count; i++) {
+        final t = extractor.extractText(startPageIndex: i, endPageIndex: i).trim();
+        totalChars += t.length;
+        pagesText.add(t);
+      }
+
+      if (totalChars > 20) {
+        final compactDoc = pw.Document(compress: true);
+        for (final pageText in pagesText) {
+          final lines = pageText.replaceAll('\r\n', '\n').split('\n');
+          compactDoc.addPage(
+            pw.MultiPage(
+              margin: const pw.EdgeInsets.all(28),
+              build: (context) => lines
+                  .map((line) => pw.Padding(
+                        padding: const pw.EdgeInsets.only(bottom: 3),
+                        child: pw.Text(
+                          line.isEmpty ? ' ' : line,
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ))
+                  .toList(),
+            ),
+          );
+        }
+        final compactBytes = await compactDoc.save();
+        if (compactBytes.length < outBytes.length) {
+          outBytes = compactBytes;
+        }
+      }
+    }
+
+    srcDoc.dispose();
+
+    // Never output a file larger than original if target wasn't forced
+    if (outBytes.length > originalBytes.length) {
+      outBytes = originalBytes;
+    }
+
+    final dir = await getTemporaryDirectory();
+    final suffix = targetKb != null ? '${targetKb}kb' : 'compressed';
+    final outFile = File('${dir.path}/${_baseName(pdfFile)}_$suffix.pdf');
+    await outFile.writeAsBytes(outBytes);
     return outFile;
   }
 
@@ -143,6 +262,7 @@ class PdfConverter {
   /// Merge multiple PDFs into one (preserving exact page sizes)
   static Future<File> mergePdfs(List<File> pdfFiles) async {
     final sf.PdfDocument finalDoc = sf.PdfDocument();
+    finalDoc.compressionLevel = sf.PdfCompressionLevel.best;
 
     for (final file in pdfFiles) {
       final bytes = await file.readAsBytes();
@@ -252,7 +372,6 @@ class PdfConverter {
     final bytes = await pdfFile.readAsBytes();
     final document = sf.PdfDocument(inputBytes: bytes, password: password);
 
-    // Clear passwords so the saved PDF is actually unlocked!
     document.security.userPassword = '';
     document.security.ownerPassword = '';
 
@@ -267,7 +386,7 @@ class PdfConverter {
   static Future<File> textToPdf(File txtFile) async {
     final content = await txtFile.readAsString();
     final lines = content.replaceAll('\r\n', '\n').split('\n');
-    final doc = pw.Document();
+    final doc = pw.Document(compress: true);
     doc.addPage(
       pw.MultiPage(
         build: (context) => lines
